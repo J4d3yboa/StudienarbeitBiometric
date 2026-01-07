@@ -50,19 +50,14 @@ fun WearApp(greetingName: String) {
             contentAlignment = Alignment.Center
         ) {
             TimeText()
-            Greeting(greetingName = greetingName)
+            MainMenu()
         }
     }
 }
 
 @Composable
-fun Greeting(greetingName: String) {
-    Text(
-        modifier = Modifier.fillMaxWidth(),
-        textAlign = TextAlign.Center,
-        color = MaterialTheme.colors.primary,
-        text = stringResource(R.string.hello_world, greetingName)
-    )
+fun MainMenu() {
+    Text(text = "Meine Biometrie App")
 }
 
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
