@@ -52,6 +52,7 @@ dependencies {
     implementation(libs.wear.tooling.preview)
     implementation(libs.activity.compose)
     implementation(libs.core.splashscreen)
+    implementation(libs.navigation.compose)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.ui.test.junit4)
     debugImplementation(libs.ui.tooling)
@@ -60,6 +61,7 @@ dependencies {
     // Grundlegende Wear OS Bibliotheken
     implementation("androidx.core:core-splashscreen:1.2.0")
     implementation("com.google.android.gms:play-services-wearable:19.0.0")
+    implementation("androidx.compose.material:material-icons-extended")
 
     // Jetpack Compose für Wear OS (Die wichtigste UI-Bibliothek)
     // Hinweis: Prüfen Sie auf die aktuellste stabile Version
