@@ -72,4 +72,12 @@ dependencies {
 
     // Integration mit Activities
     implementation("androidx.activity:activity-compose:1.9.0")
+    // Health Services Client
+    implementation("androidx.health:health-services-client:1.1.0-alpha05") // oder stabilste Version
+
+    // Coroutines für asynchrone Aufrufe (Guava ListenableFuture support)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.9.0")
+
+    // Lifecycle Service für Foreground Management
+    implementation("androidx.lifecycle:lifecycle-service:2.8.7")
 }

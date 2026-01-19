@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -36,6 +35,7 @@ import com.example.studienarbeitbiometric.presentation.theme.StudienarbeitBiomet
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
@@ -89,7 +89,9 @@ fun Auto(navController: NavController) {
 
 @Composable
 fun Navigation(navController: NavController) {
-    Column {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text = "Navigationsmenü")
+        Spacer(modifier = Modifier.height(8.dp))
         Chip(
             onClick = { navController.navigate("auto") },
             colors = ChipDefaults.chipColors(),
@@ -122,7 +124,7 @@ fun Navigation(navController: NavController) {
                     // tint = MaterialTheme.colors.primary
                 )
                 Spacer(modifier = Modifier.width(8.dp)) // Etwas Abstand
-                Text("Auto")
+                Text("Sport")
             }
         }
     }
