@@ -53,6 +53,7 @@ dependencies {
     implementation(libs.activity.compose)
     implementation(libs.core.splashscreen)
     implementation(libs.navigation.compose)
+    implementation(libs.navigation.common.ktx)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.ui.test.junit4)
     debugImplementation(libs.ui.tooling)
@@ -80,4 +81,13 @@ dependencies {
 
     // Lifecycle Service für Foreground Management
     implementation("androidx.lifecycle:lifecycle-service:2.8.7")
+    implementation("androidx.compose.material3:material3")
+    val horologistVersion = "0.6.17"
+    implementation("com.google.android.horologist:horologist-composables:${horologistVersion}")
+// 2. Erweiterte Layouts (z.B. AppScaffold, ScreenScaffold mit Scroll-Support)
+    implementation("com.google.android.horologist:horologist-compose-layout:${horologistVersion}")
+// 3. Wenn du eine Media-App baust (Player, Lautstärke)
+    implementation("com.google.android.horologist:horologist-media-ui:${horologistVersion}")
+// 4. Für Kommunikation zwischen Handy und Uhr (DataLayer)
+    implementation("com.google.android.horologist:horologist-datalayer:${horologistVersion}")
 }
