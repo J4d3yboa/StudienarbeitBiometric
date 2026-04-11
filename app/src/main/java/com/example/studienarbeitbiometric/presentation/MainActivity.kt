@@ -1,16 +1,11 @@
-/* While this template provides a good starting point for using Wear Compose, you can always
- * take a look at https://github.com/android/wear-os-samples/tree/main/ComposeStarter to find the
- * most up to date changes to the libraries and their usages.
- */
-
 package com.example.studienarbeitbiometric.presentation
 
-import android.R.attr.type
-import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,93 +16,134 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
-import androidx.wear.compose.material.Chip
-import androidx.wear.compose.material.ChipDefaults
-import androidx.wear.compose.material.Text
-import androidx.wear.compose.material.TimeText
-import androidx.wear.tooling.preview.devices.WearDevices
-import com.example.studienarbeitbiometric.R
-import com.example.studienarbeitbiometric.presentation.theme.StudienarbeitBiometricTheme
-//hinzugefügt
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
+import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
+import androidx.wear.compose.material.Button
+import androidx.wear.compose.material.ButtonDefaults
+import androidx.wear.compose.material.Chip
+import androidx.wear.compose.material.ChipDefaults
 import androidx.wear.compose.material.Icon
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.wear.compose.material.MaterialTheme
+import androidx.wear.compose.material.Text
+import androidx.wear.compose.material.TimeText
+import androidx.wear.compose.material.dialog.Dialog
+import androidx.wear.tooling.preview.devices.WearDevices
+import com.example.studienarbeitbiometric.presentation.theme.StudienarbeitBiometricTheme
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.google.android.horologist.annotations.ExperimentalHorologistApi
 import com.google.android.horologist.composables.ProgressIndicatorSegment
 import com.google.android.horologist.composables.SegmentedProgressIndicator
+import services.ExerciseService
 
+data class statusWithHeart(
+    val status: ActivityStatus,
+    val heart: Int
+)
+
+// Farben modernisiert und für AMOLED Wear OS optimiert
+enum class ActivityStatus(val label: String, val color: Color, val progress: Float) {
+    SEHR_GUT("Sehr gut", Color(0xFF4CAF50), 0.2f),     // Modernes Grün
+    GUT("Gut", Color(0xFF8BC34A), 0.4f),             // Hellgrün
+    OK("Ok", Color(0xFFFFEB3B), 0.6f),               // Klares Gelb
+    NICHT_SO_GUT("Riskant", Color(0xFFFF9800), 0.8f),// Gekürzt für Wear OS Screen
+    GARNICHT_GUT("Kritisch", Color(0xFFE53935), 1.0f)// Klares Rot, kurzer Text
+}
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
-
         super.onCreate(savedInstanceState)
-
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
         setTheme(android.R.style.Theme_DeviceDefault)
-
         setContent {
-            WearApp("Android")
+            WearApp()
         }
     }
 }
 
-enum class ActivityStatus(val label: String, val color: Color, val progress: Float) {
-    SEHR_GUT("Sehr gut", Color.Green, 0.2f),
-    GUT("Gut", Color(0xFF8BC34A), 0.4f), // Helles Grün
-    OK("Ok", Color.Yellow,0.6f),
-    NICHT_SO_GUT("Nicht so gut", Color(0xFFFF9800),0.8f), // Orange
-    GARNICHT_GUT("Garnicht gut", Color.Red,1.0f); // Kritischer Status
-}
-
+@OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun WearApp(greetingName: String) {
+fun WearApp() {
+    val context = LocalContext.current
+
+    val permissionState = rememberMultiplePermissionsState(
+        permissions = listOf(
+            android.Manifest.permission.BODY_SENSORS,
+            android.Manifest.permission.ACTIVITY_RECOGNITION,
+            android.Manifest.permission.VIBRATE,
+            "android.permission.health.READ_HEART_RATE",
+            android.Manifest.permission.POST_NOTIFICATIONS
+        )
+    )
+
+    val healthConnectClient = remember {
+        try {
+            if (HealthConnectClient.getSdkStatus(context, "com.google.android.apps.healthdata") == HealthConnectClient.SDK_AVAILABLE) {
+                HealthConnectClient.getOrCreate(context)
+            } else null
+        } catch (e: Exception) { null }
+    }
+
+    val hrvPermission = setOf(HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class))
+    val healthConnectPermissionLauncher = rememberLauncherForActivityResult(
+        contract = PermissionController.createRequestPermissionResultContract()
+    ) { granted -> }
+
+    LaunchedEffect(Unit) {
+        permissionState.launchMultiplePermissionRequest()
+        healthConnectClient?.let { client ->
+            val granted = client.permissionController.getGrantedPermissions()
+            if (!granted.containsAll(hrvPermission)) {
+                healthConnectPermissionLauncher.launch(hrvPermission)
+            }
+        }
+    }
+
     StudienarbeitBiometricTheme {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaterialTheme.colorScheme.onBackground),
-            contentAlignment = Alignment.Center
-        ) {
-            TimeText()
+        Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            TimeText() // Zeigt die Uhrzeit dezent oben gebogen an
             val navController = rememberNavController()
 
             NavHost(navController = navController, startDestination = "home") {
-                composable("home") {Navigation(navController)}
+                composable("home") { Navigation(navController) }
                 composable(
                     route = "activity/{activityId}",
                     arguments = listOf(navArgument("activityId") { type = NavType.StringType })
@@ -121,260 +157,272 @@ fun WearApp(greetingName: String) {
 }
 
 @Composable
-fun MainMenu() {
-    Text(text = "Meine Biometrie App")
-}
-
-@Composable
-fun Activity(navController: NavController, activityId: String?,  viewModel: SensorViewModel = viewModel() ) {
-    // 1. Zustands-Variablen
+fun Activity(navController: NavController, activityId: String?, viewModel: SensorViewModel = viewModel()) {
     val status by viewModel.aggregatedStatus.collectAsStateWithLifecycle()
-    var isStarted by remember { mutableStateOf(false) } // NEU: Initial nicht gestartet
+    var isStarted by remember { mutableStateOf(false) }
     var isPaused by remember { mutableStateOf(false) }
     var isCritical by remember { mutableStateOf(false) }
+    val context = LocalContext.current
 
     LaunchedEffect(isStarted) {
         if (isStarted) {
-            viewModel.startSimulation()
+            viewModel.startDataCollection()
+            val intent = Intent(context, ExerciseService::class.java).apply { action = "ACTION_START" }
+            context.startForegroundService(intent)
         } else {
-            viewModel.stopSimulation()
+            viewModel.stopDataCollection()
+            val intent = Intent(context, ExerciseService::class.java).apply { action = "ACTION_STOP" }
+            context.startService(intent)
         }
     }
 
-    // Logik-Überwachung (bleibt gleich)
-    LaunchedEffect(status) {
-        if (status == ActivityStatus.GARNICHT_GUT) {
+    LaunchedEffect(status.status) {
+        if (status.status == ActivityStatus.GARNICHT_GUT && !isPaused) {
             isCritical = true
-            isPaused = true
         }
     }
 
-    // 2. Das UI-Gerüst mit erweiterter Weiche
-    Column(
-        modifier = Modifier.fillMaxSize(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-
-        if (!isStarted) {
-            // --- 1. START SCREEN (Wird als erstes angezeigt) ---
-            StartScreen(
-                activityId = activityId,
-                onStart = { isStarted = true }, // Wechselt in den Modus "Laufend"
-
-            )
-        }
-        else if (isCritical) {
-            // --- 2. WARN SCREEN (Hat Vorrang vor Pause) ---
-            CriticalWarningScreen(
-                onResume = {
-                    isCritical = false
-                    isPaused = false
-                },
-                onStop = { navController.popBackStack() }
-            )
-        }
-        else if (isPaused) {
-            // --- 3. PAUSE SCREEN ---
-            PauseScreen(
-                onResume = { isPaused = false },
-                onStop = { navController.popBackStack() }
-            )
-        }
-        else {
-            // --- 4. RUNNING SCREEN (Normalbetrieb) ---
-            RunningScreen(
-                activityId = activityId,
-                currentStatus = status,
-                onPause = { isPaused = true },
-                onSimulateBadStatus = {  }
-            )
-        }
+    when {
+        !isStarted -> StartScreen(activityId = activityId, onStart = { isStarted = true })
+        isCritical -> CriticalWarningScreen(
+            onPause = { isCritical = false; isPaused = true },
+            onStop = { isStarted = false; isCritical = false; navController.popBackStack() }
+        )
+        isPaused -> PauseScreen(
+            currentStatus = status.status,
+            onResume = { isPaused = false },
+            onStop = { isStarted = false; isPaused = false; navController.popBackStack() }
+        )
+        else -> RunningScreen(
+            activityId = activityId,
+            currentStatus = status.status,
+            heart = status.heart,
+            onPause = { isPaused = true }
+        )
     }
 }
 
+// ---------------- UI SCREENS (Minimalistisch & Skalierbar) ----------------
+
 @Composable
-fun StartScreen(
-    activityId: String?,
-    onStart: () -> Unit
-    // onBack habe ich aus den Parametern entfernt, da der Button weg ist
-) {
+fun StartScreen(activityId: String?, onStart: () -> Unit) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 1. Nur der Text mit der ID
         Text(
-            text = activityId ?: "Aktivität",
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold
+            text = activityId?.uppercase() ?: "AKTIVITÄT",
+            style = MaterialTheme.typography.title2,
+            color = MaterialTheme.colors.primary
         )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        // 2. Nur der Start-Button
+        Spacer(modifier = Modifier.height(16.dp))
         Button(
-            onClick = onStart
+            onClick = onStart,
+            modifier = Modifier.size(ButtonDefaults.LargeButtonSize),
+            colors = ButtonDefaults.primaryButtonColors()
         ) {
-            Text("Start")
+            Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = "Start", modifier = Modifier.size(32.dp))
         }
     }
 }
-
 
 @OptIn(ExperimentalHorologistApi::class)
 @Composable
 fun RunningScreen(
     activityId: String?,
     currentStatus: ActivityStatus,
-    onPause: () -> Unit,
-    onSimulateBadStatus: () -> Unit
+    heart: Int,
+    onPause: () -> Unit
 ) {
-    Box(modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+
+        // Minimalistische Zentrum-Anzeige
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp), // Etwas Abstand zum Rand
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp) // Gleichmäßige, kleinere Abstände
+            verticalArrangement = Arrangement.Center
         ) {
-            // 1. Überschrift etwas kleiner
-
-
-            // 2. Karte passt sich dem Inhalt an (keine feste Höhe mehr)
-
-                    Text(
-                        text = currentStatus.label,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color= currentStatus.color
-                    )
-
-
-
-            // 3. Buttons nebeneinander (Row) statt untereinander
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Text(
+                text = currentStatus.label.uppercase(),
+                style = MaterialTheme.typography.title3,
+                color = currentStatus.color,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    text = heart.toString(),
+                    style = MaterialTheme.typography.display1,
+                    fontWeight = FontWeight.Light,
+                    color = Color.White
+                )
+                Text(
+                    text = " bpm",
+                    style = MaterialTheme.typography.body2,
+                    color = Color.Gray,
+                    modifier = Modifier.padding(bottom = 6.dp, start = 2.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onPause,
+                modifier = Modifier.size(ButtonDefaults.SmallButtonSize),
+                colors = ButtonDefaults.secondaryButtonColors()
             ) {
-                Button(onClick = onPause) {
-                    Text("Pause")
-                }
-
-                // Debug Button (etwas kleinerer Text vielleicht, falls es eng wird)
-                Button(
-                    onClick = onSimulateBadStatus,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Gray)
-                ) {
-                    Text("Test: Schlecht")
-                }
+                Icon(imageVector = Icons.Filled.Pause, contentDescription = "Pause", modifier = Modifier.size(16.dp))
             }
         }
 
+        // Der gewünschte Ring außen herum
         SegmentedProgressIndicator(
             progress = currentStatus.progress,
             modifier = Modifier.fillMaxSize(),
             trackSegments = listOf(
-                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.SEHR_GUT.color, trackColor = Color.DarkGray),
-                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.GUT.color, trackColor = Color.DarkGray),
-                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.OK.color, trackColor = Color.DarkGray),
-                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.NICHT_SO_GUT.color, trackColor = Color.DarkGray),
-                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.GARNICHT_GUT.color, trackColor = Color.DarkGray))
+                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.SEHR_GUT.color, trackColor = Color(0xFF222222)),
+                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.GUT.color, trackColor = Color(0xFF222222)),
+                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.OK.color, trackColor = Color(0xFF222222)),
+                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.NICHT_SO_GUT.color, trackColor = Color(0xFF222222)),
+                ProgressIndicatorSegment(weight = 1f, indicatorColor = ActivityStatus.GARNICHT_GUT.color, trackColor = Color(0xFF222222))
+            )
         )
     }
 }
 
-
+// Skalierbare Liste statt statischer Column für kritische Warnung
 @Composable
-fun PauseScreen(onResume: () -> Unit, onStop: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color(0xFFFFF9C4)), // Helles Gelb
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text("PAUSE", fontSize = 40.sp, fontWeight = FontWeight.Bold)
-        Text("Tief durchatmen...", modifier = Modifier.padding(16.dp))
+fun CriticalWarningScreen(onPause: () -> Unit, onStop: () -> Unit) {
+    val listState = rememberScalingLazyListState()
 
-        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(onClick = onResume) { Text("Weiter") }
-            Button(onClick = onStop, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) { Text("Beenden") }
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        item {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = "Warnung",
+                tint = ActivityStatus.GARNICHT_GUT.color,
+                modifier = Modifier.size(48.dp)
+            )
+        }
+        item {
+            Text(
+                "GEFAHR!",
+                color = ActivityStatus.GARNICHT_GUT.color,
+                style = MaterialTheme.typography.title2,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        item {
+            Text(
+                "Sofort anhalten.",
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+        item {
+            Chip(
+                onClick = onPause,
+                label = { Text("Pause einleiten") },
+                colors = ChipDefaults.primaryChipColors(backgroundColor = Color.DarkGray),
+                modifier = Modifier.fillMaxWidth(0.8f)
+            )
+        }
+        item { Spacer(modifier = Modifier.height(4.dp)) }
+        item {
+            Chip(
+                onClick = onStop,
+                label = { Text("Beenden") },
+                colors = ChipDefaults.primaryChipColors(backgroundColor = ActivityStatus.GARNICHT_GUT.color),
+                modifier = Modifier.fillMaxWidth(0.8f)
+            )
         }
     }
 }
 
 @Composable
-fun CriticalWarningScreen(onResume: () -> Unit, onStop: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().background(Color.Red),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+fun PauseScreen(currentStatus: ActivityStatus, onResume: () -> Unit, onStop: () -> Unit) {
+    val listState = rememberScalingLazyListState()
+    val canResume = currentStatus.ordinal <= ActivityStatus.OK.ordinal
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Text("WARNUNG!", color = Color.White, fontSize = 48.sp, fontWeight = FontWeight.Bold)
-        Text(
-            "Werte sind kritisch. Sofort anhalten!",
-            color = Color.White,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(16.dp)
-        )
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        Button(
-            onClick = onResume,
-            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Red)
-        ) {
-            Text("Mir geht es wieder gut")
+        item {
+            Text("PAUSE", style = MaterialTheme.typography.title1, color = Color(0xFFBB86FC))
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = onStop,
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Black)
-        ) {
-            Text("Not-Stopp")
+        item {
+            Text(
+                text = if (canResume) "Puls normalisiert" else "Puls zu hoch",
+                color = if (canResume) Color.Gray else ActivityStatus.GARNICHT_GUT.color,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+        }
+        if (canResume) {
+            item {
+                Chip(
+                    onClick = onResume,
+                    label = { Text("Weiter") },
+                    icon = { Icon(Icons.Filled.PlayArrow, contentDescription = "Play") },
+                    colors = ChipDefaults.primaryChipColors(backgroundColor = ActivityStatus.SEHR_GUT.color),
+                    modifier = Modifier.fillMaxWidth(0.8f)
+                )
+            }
+        }
+        item { Spacer(modifier = Modifier.height(4.dp)) }
+        item {
+            Chip(
+                onClick = onStop,
+                label = { Text("Beenden") },
+                icon = { Icon(Icons.Filled.Stop, contentDescription = "Stop") },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.8f)
+            )
         }
     }
 }
+
+// Hauptmenü als skalierbare Wear OS Liste
 @Composable
 fun Navigation(navController: NavController) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = "Navigationsmenü")
-        Spacer(modifier = Modifier.height(8.dp))
-        Chip(
-            onClick = { navController.navigate("activity/auto") },
-            colors = ChipDefaults.chipColors(),
-            border = ChipDefaults.chipBorder(),
-        )
-        {
-            Row {
-                Icon(
-                    imageVector = Icons.Filled.DirectionsCar, // "DirectionsCar" ist das Standard Auto Icon
-                    contentDescription = "Auto Icon",
-                    // Optional: Farbe anpassen
-                    // tint = MaterialTheme.colors.primary
-                )
-                Spacer(modifier = Modifier.width(8.dp)) // Etwas Abstand
-                Text("Auto")
-            }
+    val listState = rememberScalingLazyListState()
+
+    ScalingLazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        state = listState,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        item {
+            Text(
+                text = "Modus wählen",
+                style = MaterialTheme.typography.caption1,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Chip(
-            onClick = { navController.navigate("activity/sport") },
-            colors = ChipDefaults.chipColors(),
-            border = ChipDefaults.chipBorder(),
-        )
-        {
-            Row {
-                Icon(
-                    imageVector = Icons.Filled.FitnessCenter, // "DirectionsCar" ist das Standard Auto Icon
-                    contentDescription = "Hantel Icon",
-                    // Optional: Farbe anpassen
-                    // tint = MaterialTheme.colors.primary
-                )
-                Spacer(modifier = Modifier.width(8.dp)) // Etwas Abstand
-                Text("Sport")
-            }
+        item {
+            Chip(
+                onClick = { navController.navigate("activity/auto") },
+                label = { Text("Auto") },
+                icon = { Icon(Icons.Filled.DirectionsCar, "Auto") },
+                colors = ChipDefaults.primaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.8f)
+            )
+        }
+        item { Spacer(modifier = Modifier.height(8.dp)) }
+        item {
+            Chip(
+                onClick = { navController.navigate("activity/sport") },
+                label = { Text("Sport") },
+                icon = { Icon(Icons.Filled.FitnessCenter, "Sport") },
+                colors = ChipDefaults.secondaryChipColors(),
+                modifier = Modifier.fillMaxWidth(0.8f)
+            )
         }
     }
 }
@@ -382,5 +430,5 @@ fun Navigation(navController: NavController) {
 @Preview(device = WearDevices.SMALL_ROUND, showSystemUi = true)
 @Composable
 fun DefaultPreview() {
-    WearApp("Preview Android")
+    WearApp()
 }

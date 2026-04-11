@@ -7,12 +7,18 @@ import android.content.Context
 import android.content.Intent
 import android.os.Binder
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.health.services.client.ExerciseClient
 import androidx.health.services.client.HealthServices
+import androidx.health.services.client.data.DataType
+import androidx.health.services.client.data.ExerciseConfig
+import androidx.health.services.client.data.ExerciseType
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
+import android.content.pm.PackageManager
 
 class ExerciseService : LifecycleService() {
 
@@ -42,29 +48,100 @@ class ExerciseService : LifecycleService() {
         return binder
     }
 
+
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        // START_STICKY sorgt dafür, dass der Service neu startet, falls er abstürzt
+
+        when (intent?.action) {
+            "ACTION_START" -> {
+                startMonitoring() // Ihre Funktion, die exerciseClient.startExerciseAsync aufruft
+            }
+            "ACTION_STOP" -> {
+                stopMonitoring() // Ihre Funktion, die stoppt und stopSelf() ruft
+            }
+        }
+
         return START_STICKY
     }
+
 
     // --- Platzhalter für Ihre Logik ---
 
     fun startMonitoring() {
-        lifecycleScope.launch {
-            // Hier kommt später der Code für exerciseClient.startExerciseAsync() hin
-            // Sobald das Training startet, müssen wir den Service "promoten":
+        Log.d("ExerciseService", "Versuche Training zu starten...")
+
+        // 1. SICHERHEITS-CHECK VOR DEM START
+        val hasHeartRatePerm = checkSelfPermission("android.permission.health.READ_HEART_RATE") == PackageManager.PERMISSION_GRANTED
+        val hasBodySensorsPerm = checkSelfPermission(android.Manifest.permission.BODY_SENSORS) == PackageManager.PERMISSION_GRANTED
+
+        if (!hasHeartRatePerm && !hasBodySensorsPerm) {
+            Log.e("ExerciseService", "ABBRUCH: Keine Berechtigungen vorhanden!")
+            stopSelf() // Service sofort beenden
+            return
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            startForeground(
+                1,
+                createNotification(),
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH
+            )
+        } else {
             startForeground(1, createNotification())
+        }
+
+
+        lifecycleScope.launch {
+            try {
+                // Konfiguration um den Datentyp für RMSSD (Herzratenvariabilität) erweitert
+                // FIX: WALKING erlaubt STEPS_PER_MINUTE und ist empfindlich genug,
+                // um die Vibrationen am Autolenkrad zu registrieren.
+                val config = ExerciseConfig.builder(ExerciseType.WALKING)
+                    .setDataTypes(setOf(DataType.HEART_RATE_BPM, DataType.STEPS_PER_MINUTE))
+                    .setIsAutoPauseAndResumeEnabled(false)
+                    .build()
+
+
+
+
+                Log.d("ExerciseService", "Rufe startExerciseAsync auf...")
+
+                exerciseClient.startExerciseAsync(config).await()
+
+                Log.d("ExerciseService", "Training ERFOLGREICH gestartet!")
+
+            } catch (e: SecurityException) {
+                // Spezifischer Catch für Permissions
+                Log.e("ExerciseService", "SecurityException trotz Check: ${e.message}")
+                stopSelf()
+            } catch (e: Exception) {
+                Log.e("ExerciseService", "Allgemeiner Fehler beim Starten!", e)
+                stopSelf()
+            }
         }
     }
 
+
+
     fun stopMonitoring() {
         lifecycleScope.launch {
-            // exerciseClient.endExerciseAsync()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            try {
+                // Versuche das Training offiziell zu beenden
+                exerciseClient.endExerciseAsync().await()
+                Log.d("ExerciseService", "Training erfolgreich beendet.")
+            } catch (e: Exception) {
+                // Fange die HealthServicesException ab, falls gar kein Training aktiv war
+                Log.w("ExerciseService", "Fehler beim Beenden (Kein aktives Training): ${e.message}")
+            } finally {
+                // Service in jedem Fall zuverlässig stoppen
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         }
     }
+
+
 
     // --- Hilfsfunktionen für Benachrichtigungen ---
 

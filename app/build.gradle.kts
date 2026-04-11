@@ -90,4 +90,6 @@ dependencies {
     implementation("com.google.android.horologist:horologist-media-ui:${horologistVersion}")
 // 4. Für Kommunikation zwischen Handy und Uhr (DataLayer)
     implementation("com.google.android.horologist:horologist-datalayer:${horologistVersion}")
+    implementation("com.google.accompanist:accompanist-permissions:0.36.0")
+    implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
 }

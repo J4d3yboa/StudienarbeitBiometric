@@ -1,21 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-
     <uses-feature android:name="android.hardware.type.watch" />
-
-    <!-- Vitalwerte lesen -->
     <uses-permission android:name="android.permission.BODY_SENSORS" />
-    <!-- Auf neueren APIs spezifischer: -->
-    <uses-permission android:name="android.permission.READ_HEART_RATE" />
-
-    <!-- Training erkennen/pausieren -->
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
-
-    <!-- Wichtig: Damit der Service weiterläuft -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Optionale Ergänzung für erhöhte Ausfallsicherheit im Langzeitbetrieb -->
+    <uses-permission android:name="android.permission.BODY_SENSORS_BACKGROUND" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+
+
 
     <application
         android:allowBackup="true"
@@ -30,10 +31,6 @@
             android:name="wear-sdk"
             android:required="false" />
 
-        <!--
-               Set to true if your app is Standalone, that is, it does not require the handheld
-               app to run.
-        -->
         <meta-data
             android:name="com.google.android.wearable.standalone"
             android:value="true" />
@@ -43,6 +40,7 @@
             android:exported="true"
             android:taskAffinity=""
             android:theme="@style/MainActivityTheme.Starting">
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -51,9 +49,10 @@
 
         </activity>
         <service
-            android:name=".services.ExerciseService"
+            android:name="services.ExerciseService"
+            android:enabled="true"
             android:exported="true"
-            android:foregroundServiceType="health">
+            android:foregroundServiceType="health" >
         </service>
     </application>
 
