@@ -1,6 +1,14 @@
 package com.example.studienarbeitbiometric.presentation
 
 import android.app.Application
+import android.content.Context
+import android.content.Intent
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.media.RingtoneManager
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
@@ -12,6 +20,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,9 +32,9 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import kotlin.math.pow
 
 data class VitalData(
     val heartRate: Int = 0,
@@ -36,24 +45,16 @@ data class VitalData(
 class SensorViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
-        // Zeitliche Konstanten
         private const val EMERGENCY_COOLDOWN_MS = 10000L
         private const val HRV_LOOKBACK_HOURS = 24L
-
-        // Kalibrierung
         private const val CALIBRATION_PHASE_COUNT = 10
+        private const val SLIDING_WINDOW_SIZE = 15
+        private const val CRITICAL_STATE_THRESHOLD = 12
 
-        // --- NEU: Konstante für die Karenzzeit ---
-        private const val CRITICAL_STATE_THRESHOLD = 5
-
-        // Algorithmus: Hardware / Physiologie-Toleranz
         private val EMERGENCY_HR_LOWER_RANGE = 1..40
         private const val EMERGENCY_HR_UPPER_LIMIT = 140
 
-        // Algorithmus: HRV Schwellen
         private const val HRV_STRESS_THRESHOLD = 20.0
-
-        // Algorithmus: Bewegungsschwellen
         private const val MOVEMENT_AGITATION = 100
         private const val MOVEMENT_MENTAL_LOAD = 20
         private const val MOVEMENT_SLEEP = 15
@@ -77,11 +78,14 @@ class SensorViewModel(application: Application) : AndroidViewModel(application) 
             if (dataPoints.isNotEmpty()) dataPoints.last().value.toInt() else null
         }
 
-    private val _realHrvState = MutableStateFlow(0.0)
-    val realHrvFlow: StateFlow<Double> = _realHrvState
+    private val realHrvState = MutableStateFlow(0.0)
+    val realHrvFlow: StateFlow<Double> = realHrvState
 
-    // Clean Architecture: ViewModel triggert nur ein Event, Activity führt UI/Vibration aus
-    private val _emergencyEventFlow = MutableSharedFlow<Unit>()
+    private val _emergencyEventFlow = MutableSharedFlow<Unit>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
+    )
     val emergencyEventFlow: SharedFlow<Unit> = _emergencyEventFlow.asSharedFlow()
 
     private val healthConnectClient: HealthConnectClient? by lazy {
@@ -96,21 +100,19 @@ class SensorViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // Baseline‑Kalibrierung
     private var baselineHeartRate: Int? = null
     private val initialHeartRates = mutableListOf<Int>()
+    private var baselineVariance: Double = 0.0
+    private val recentHeartRates = mutableListOf<Int>()
 
-    // Notfall‑Steuerung
     private var activeCollectionJob: Job? = null
     private var lastEmergencyTime = 0L
-
-    // --- NEU: Zähler für die Karenzzeit ---
     private var criticalStateCounter = 0
 
     val aggregatedStatus: StateFlow<statusWithHeart> = combine(
         realHeartRateFlow, realHrvFlow, realMovementFlow
     ) { hr, hrv, movement ->
-        if (hr == 0) return@combine statusWithHeart(ActivityStatus.SEHR_GUT, hr)
+        if (hr <= 0) return@combine statusWithHeart(ActivityStatus.SEHR_GUT, hr)
         calculateDriverFitnessStatus(hr, hrv, movement)
     }.stateIn(
         scope = viewModelScope,
@@ -129,13 +131,10 @@ class SensorViewModel(application: Application) : AndroidViewModel(application) 
     )
 
     fun startDataCollection() {
-        // Bestehenden Job sicher beenden, bevor ein neuer gestartet wird
         activeCollectionJob?.cancel()
-
-        // Zähler beim Neustart zurücksetzen
         criticalStateCounter = 0
+        recentHeartRates.clear()
 
-        // DB Abfragen zwingend auf Dispatchers.IO ausführen
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val endTime = Instant.now()
@@ -149,26 +148,26 @@ class SensorViewModel(application: Application) : AndroidViewModel(application) 
                 )
 
                 val latestRecord = response?.records?.maxByOrNull { it.time }
-                _realHrvState.value = latestRecord?.heartRateVariabilityMillis ?: 0.0
+                realHrvState.value = latestRecord?.heartRateVariabilityMillis ?: 0.0
 
             } catch (e: Exception) {
                 Log.e("SensorViewModel", "Fehler beim Abruf der HRV-Daten: ${e.message}")
-                _realHrvState.value = 0.0
+                realHrvState.value = 0.0
             }
         }
 
         activeCollectionJob = viewModelScope.launch {
             aggregatedStatus.collect { state ->
-                // --- NEU: Implementierung der Karenzzeit ---
                 if (state.status == ActivityStatus.GARNICHT_GUT) {
                     criticalStateCounter++
                     if (criticalStateCounter >= CRITICAL_STATE_THRESHOLD) {
                         triggerEmergencyAlert()
-                        criticalStateCounter = 0 // Reset nach Auslösung
+                        criticalStateCounter = 0
                     }
                 } else {
-                    // Zähler bei besserem Zustand schrittweise reduzieren
-                    if (criticalStateCounter > 0) criticalStateCounter--
+                    if (criticalStateCounter > 0) {
+                        criticalStateCounter--
+                    }
                 }
             }
         }
@@ -179,21 +178,53 @@ class SensorViewModel(application: Application) : AndroidViewModel(application) 
         activeCollectionJob = null
         baselineHeartRate = null
         initialHeartRates.clear()
-        criticalStateCounter = 0 // Zähler beim Stoppen zurücksetzen
+        recentHeartRates.clear()
+        baselineVariance = 0.0
+        criticalStateCounter = 0
     }
 
     private fun triggerEmergencyAlert() {
         val currentTime = System.currentTimeMillis()
         if (currentTime - lastEmergencyTime < EMERGENCY_COOLDOWN_MS) return
+
         lastEmergencyTime = currentTime
 
-        stopDataCollection()
+        val context = getApplication<Application>()
 
-        // Statt direkter Systemaufrufe wird ein Event emittiert.
-        // Die Activity/das Fragment muss diesen Flow abonnieren und die UI-Action ausführen.
-        viewModelScope.launch {
-            _emergencyEventFlow.emit(Unit)
+        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        val vibrationPattern = longArrayOf(0, 1000, 500, 1000, 500, 1000, 500, 1500)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val amplitudes = intArrayOf(0, 255, 0, 255, 0, 255, 0, 255)
+            vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, amplitudes, -1))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(vibrationPattern, -1)
         }
+
+        try {
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).build()
+                audioManager.requestAudioFocus(focusRequest)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.requestAudioFocus(null, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            }
+            val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            val ringtone = RingtoneManager.getRingtone(context, alarmUri)
+            ringtone.play()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        context.startActivity(intent)
+
+        _emergencyEventFlow.tryEmit(Unit)
+        stopDataCollection()
     }
 
     private fun calculateDriverFitnessStatus(
@@ -215,66 +246,67 @@ class SensorViewModel(application: Application) : AndroidViewModel(application) 
         extraRisk: Int
     ): statusWithHeart {
 
-        // Phase 1: BASELINE & INITIALRISIKO
         if (baselineHeartRate == null) {
             if (initialHeartRates.size < CALIBRATION_PHASE_COUNT) {
                 if (liveHr > 0) initialHeartRates.add(liveHr)
                 return statusWithHeart(ActivityStatus.SEHR_GUT, liveHr)
             } else {
-                baselineHeartRate = initialHeartRates.average().toInt()
+                val mean = initialHeartRates.average()
+                baselineHeartRate = mean.toInt()
+                baselineVariance = initialHeartRates.map { (it - mean).pow(2) }.average()
             }
         }
 
-        val baseHr = baselineHeartRate ?: liveHr
-        val deltaHR = liveHr - baseHr
+        recentHeartRates.add(liveHr)
+        if (recentHeartRates.size > SLIDING_WINDOW_SIZE) {
+            recentHeartRates.removeAt(0)
+        }
+        val smoothedHr = recentHeartRates.average().toInt()
+
+        val baseHr = baselineHeartRate ?: smoothedHr
+
+        val deltaPercentage = if (baseHr > 0) ((smoothedHr - baseHr).toDouble() / baseHr) * 100.0 else 0.0
 
         val isChronicallyStressed = baselineHrv > 0.0 && baselineHrv < HRV_STRESS_THRESHOLD
         var riskScore = if (isChronicallyStressed) 2 else 1
-
         riskScore += extraRisk
 
-        // Phase 2: AKUTE PULS-ABWEICHUNG
         if (isChronicallyStressed) {
             when {
-                deltaHR >= 35 -> riskScore += 3
-                deltaHR in 20..34 -> riskScore += 2
-                deltaHR in 10..19 -> riskScore += 1
-                deltaHR <= -15 -> riskScore += 2
-                deltaHR in -14..-10 -> riskScore += 1
+                deltaPercentage >= 35.0 -> riskScore += 3
+                deltaPercentage in 20.0..34.9 -> riskScore += 2
+                deltaPercentage in 10.0..19.9 -> riskScore += 1
+                deltaPercentage <= -15.0 -> riskScore += 2
+                deltaPercentage in -14.9..-10.0 -> riskScore += 1
             }
         } else {
             when {
-                deltaHR >= 40 -> riskScore += 3
-                deltaHR in 25..39 -> riskScore += 2
-                deltaHR in 15..24 -> riskScore += 1
-                deltaHR <= -15 -> riskScore += 2
-                deltaHR in -14..-10 -> riskScore += 1
+                deltaPercentage >= 40.0 -> riskScore += 3
+                deltaPercentage in 25.0..39.9 -> riskScore += 2
+                deltaPercentage in 15.0..24.9 -> riskScore += 1
+                deltaPercentage <= -15.0 -> riskScore += 2
+                deltaPercentage in -14.9..-10.0 -> riskScore += 1
             }
         }
 
-        // Phase 3: KINEMATISCHE VERHALTENSVALIDIERUNG
         if (riskScore >= 2) {
-            if (deltaHR >= 20 && liveMovement > MOVEMENT_AGITATION) {
-                riskScore += 1
-            } else if (deltaHR >= 20 && liveMovement < MOVEMENT_MENTAL_LOAD) {
+            if (deltaPercentage >= 20.0 && liveMovement > MOVEMENT_AGITATION) {
+                riskScore -= 1
+            } else if (deltaPercentage >= 20.0 && liveMovement < MOVEMENT_MENTAL_LOAD) {
                 riskScore += 2
-            } else if (deltaHR <= -10 && liveMovement < MOVEMENT_SLEEP) {
+            } else if (deltaPercentage <= -10.0 && liveMovement < MOVEMENT_SLEEP) {
                 riskScore += 2
             }
         }
 
-        // Phase 4: ZUSATZ-KORREKTUREN
-        if (deltaHR in -9..-5 && liveMovement in MOVEMENT_WAKE_CORRECTION_LOWER..MOVEMENT_WAKE_CORRECTION_UPPER) {
+        if (deltaPercentage in -9.9..-5.0 && liveMovement in MOVEMENT_WAKE_CORRECTION_LOWER..MOVEMENT_WAKE_CORRECTION_UPPER) {
+            riskScore -= 1
+        }
+        if (deltaPercentage in 1.0..24.9 && liveMovement < MOVEMENT_SLEEP) {
             riskScore -= 1
         }
 
-        if (deltaHR in 1..24 && liveMovement < MOVEMENT_SLEEP) {
-            riskScore -= 1
-        }
-
-        // Phase 5: MAPPING
         val finalScore = riskScore.coerceIn(1, 5)
-
         return when (finalScore) {
             1 -> statusWithHeart(ActivityStatus.SEHR_GUT, liveHr)
             2 -> statusWithHeart(ActivityStatus.GUT, liveHr)

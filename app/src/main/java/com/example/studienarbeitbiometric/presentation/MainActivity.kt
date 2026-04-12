@@ -1,8 +1,15 @@
 package com.example.studienarbeitbiometric.presentation
 
+import android.content.Context
 import android.content.Intent
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.media.RingtoneManager
+import android.os.Build
 import android.os.Bundle
-import android.util.Log
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -19,7 +26,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsCar
-import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -38,7 +44,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
@@ -62,7 +67,6 @@ import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
-import androidx.wear.compose.material.dialog.Dialog
 import androidx.wear.tooling.preview.devices.WearDevices
 import com.example.studienarbeitbiometric.presentation.theme.StudienarbeitBiometricTheme
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
@@ -77,25 +81,33 @@ data class statusWithHeart(
     val heart: Int
 )
 
-// Farben modernisiert und für AMOLED Wear OS optimiert
 enum class ActivityStatus(val label: String, val color: Color, val progress: Float) {
-    SEHR_GUT("Sehr gut", Color(0xFF4CAF50), 0.2f),     // Modernes Grün
-    GUT("Gut", Color(0xFF8BC34A), 0.4f),             // Hellgrün
-    OK("Ok", Color(0xFFFFEB3B), 0.6f),               // Klares Gelb
-    NICHT_SO_GUT("Riskant", Color(0xFFFF9800), 0.8f),// Gekürzt für Wear OS Screen
-    GARNICHT_GUT("Kritisch", Color(0xFFE53935), 1.0f)// Klares Rot, kurzer Text
+    SEHR_GUT("Sehr gut", Color(0xFF4CAF50), 0.2f),
+    GUT("Gut", Color(0xFF8BC34A), 0.4f),
+    OK("Ok", Color(0xFFFFEB3B), 0.6f),
+    NICHT_SO_GUT("Riskant", Color(0xFFFF9800), 0.8f),
+    GARNICHT_GUT("Kritisch", Color(0xFFE53935), 1.0f)
 }
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
         setShowWhenLocked(true)
         setTurnScreenOn(true)
+
         setTheme(android.R.style.Theme_DeviceDefault)
         setContent {
             WearApp()
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        setTurnScreenOn(true)
     }
 }
 
@@ -125,7 +137,7 @@ fun WearApp() {
     val hrvPermission = setOf(HealthPermission.getReadPermission(HeartRateVariabilityRmssdRecord::class))
     val healthConnectPermissionLauncher = rememberLauncherForActivityResult(
         contract = PermissionController.createRequestPermissionResultContract()
-    ) { granted -> }
+    ) { }
 
     LaunchedEffect(Unit) {
         permissionState.launchMultiplePermissionRequest()
@@ -139,7 +151,7 @@ fun WearApp() {
 
     StudienarbeitBiometricTheme {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            TimeText() // Zeigt die Uhrzeit dezent oben gebogen an
+            TimeText()
             val navController = rememberNavController()
 
             NavHost(navController = navController, startDestination = "home") {
@@ -182,6 +194,45 @@ fun Activity(navController: NavController, activityId: String?, viewModel: Senso
         }
     }
 
+    LaunchedEffect(isCritical) {
+        val activityContext = context as? ComponentActivity
+
+        if (isCritical) {
+            activityContext?.setTurnScreenOn(true)
+            activityContext?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            val vibrationPattern = longArrayOf(0, 1000, 500, 1000, 500, 1000, 500, 1500)
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val amplitudes = intArrayOf(0, 255, 0, 255, 0, 255, 0, 255)
+                vibrator.vibrate(VibrationEffect.createWaveform(vibrationPattern, amplitudes, -1))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(vibrationPattern, -1)
+            }
+
+            try {
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).build()
+                    audioManager.requestAudioFocus(focusRequest)
+                } else {
+                    @Suppress("DEPRECATION")
+                    audioManager.requestAudioFocus(null, AudioManager.STREAM_ALARM, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                }
+
+                val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                val ringtone = RingtoneManager.getRingtone(context, alarmUri)
+                ringtone.play()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        } else {
+            activityContext?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
     when {
         !isStarted -> StartScreen(activityId = activityId, onStart = { isStarted = true })
         isCritical -> CriticalWarningScreen(
@@ -201,8 +252,6 @@ fun Activity(navController: NavController, activityId: String?, viewModel: Senso
         )
     }
 }
-
-// ---------------- UI SCREENS (Minimalistisch & Skalierbar) ----------------
 
 @Composable
 fun StartScreen(activityId: String?, onStart: () -> Unit) {
@@ -236,8 +285,6 @@ fun RunningScreen(
     onPause: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-
-        // Minimalistische Zentrum-Anzeige
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
@@ -273,7 +320,6 @@ fun RunningScreen(
             }
         }
 
-        // Der gewünschte Ring außen herum
         SegmentedProgressIndicator(
             progress = currentStatus.progress,
             modifier = Modifier.fillMaxSize(),
@@ -288,7 +334,6 @@ fun RunningScreen(
     }
 }
 
-// Skalierbare Liste statt statischer Column für kritische Warnung
 @Composable
 fun CriticalWarningScreen(onPause: () -> Unit, onStop: () -> Unit) {
     val listState = rememberScalingLazyListState()
@@ -388,7 +433,6 @@ fun PauseScreen(currentStatus: ActivityStatus, onResume: () -> Unit, onStop: () 
     }
 }
 
-// Hauptmenü als skalierbare Wear OS Liste
 @Composable
 fun Navigation(navController: NavController) {
     val listState = rememberScalingLazyListState()
@@ -411,16 +455,6 @@ fun Navigation(navController: NavController) {
                 label = { Text("Auto") },
                 icon = { Icon(Icons.Filled.DirectionsCar, "Auto") },
                 colors = ChipDefaults.primaryChipColors(),
-                modifier = Modifier.fillMaxWidth(0.8f)
-            )
-        }
-        item { Spacer(modifier = Modifier.height(8.dp)) }
-        item {
-            Chip(
-                onClick = { navController.navigate("activity/sport") },
-                label = { Text("Sport") },
-                icon = { Icon(Icons.Filled.FitnessCenter, "Sport") },
-                colors = ChipDefaults.secondaryChipColors(),
                 modifier = Modifier.fillMaxWidth(0.8f)
             )
         }

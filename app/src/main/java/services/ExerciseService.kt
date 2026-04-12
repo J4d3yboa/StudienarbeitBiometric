@@ -3,10 +3,14 @@ package services
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.health.services.client.ExerciseClient
@@ -16,72 +20,59 @@ import androidx.health.services.client.data.ExerciseConfig
 import androidx.health.services.client.data.ExerciseType
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
+import androidx.wear.ongoing.OngoingActivity
+import androidx.wear.ongoing.Status
+import com.example.studienarbeitbiometric.presentation.MainActivity
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
-import android.content.pm.PackageManager
 
 class ExerciseService : LifecycleService() {
 
-    // Verbindungskomponenten
     private val binder = LocalBinder()
-
-    // Health Services Komponenten
     private lateinit var exerciseClient: ExerciseClient
+    private var wakeLock: PowerManager.WakeLock? = null
 
     inner class LocalBinder : Binder() {
-        // Dies gibt der Activity Zugriff auf den laufenden Service
         fun getService(): ExerciseService = this@ExerciseService
     }
 
     override fun onCreate() {
         super.onCreate()
-        // Initialisierung der Health Services
         val healthClient = HealthServices.getClient(this)
         exerciseClient = healthClient.exerciseClient
-
-        // Kanal für die Benachrichtigung erstellen (Pflicht für Foreground Services)
         createNotificationChannel()
     }
 
     override fun onBind(intent: Intent): IBinder {
-        super.onBind(intent) // Wichtig für LifecycleService!
+        super.onBind(intent)
         return binder
     }
 
-
-
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-
         when (intent?.action) {
-            "ACTION_START" -> {
-                startMonitoring() // Ihre Funktion, die exerciseClient.startExerciseAsync aufruft
-            }
-            "ACTION_STOP" -> {
-                stopMonitoring() // Ihre Funktion, die stoppt und stopSelf() ruft
-            }
+            "ACTION_START" -> startMonitoring()
+            "ACTION_STOP" -> stopMonitoring()
         }
-
         return START_STICKY
     }
 
-
-    // --- Platzhalter für Ihre Logik ---
-
     fun startMonitoring() {
-        Log.d("ExerciseService", "Versuche Training zu starten...")
-
-        // 1. SICHERHEITS-CHECK VOR DEM START
         val hasHeartRatePerm = checkSelfPermission("android.permission.health.READ_HEART_RATE") == PackageManager.PERMISSION_GRANTED
         val hasBodySensorsPerm = checkSelfPermission(android.Manifest.permission.BODY_SENSORS) == PackageManager.PERMISSION_GRANTED
 
+        // Wiederherstellung der exakten Logik: Abbruch erfolgt nur, wenn BEIDE Berechtigungen fehlen
         if (!hasHeartRatePerm && !hasBodySensorsPerm) {
             Log.e("ExerciseService", "ABBRUCH: Keine Berechtigungen vorhanden!")
-            stopSelf() // Service sofort beenden
+            stopSelf()
             return
         }
 
-        if (android.os.Build.VERSION.SDK_INT >= 34) {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "StudienarbeitBiometric::FatigueWakeLock")
+        wakeLock?.acquire()
+
+        if (Build.VERSION.SDK_INT >= 34) {
             startForeground(
                 1,
                 createNotification(),
@@ -91,67 +82,84 @@ class ExerciseService : LifecycleService() {
             startForeground(1, createNotification())
         }
 
-
         lifecycleScope.launch {
             try {
-                // Konfiguration um den Datentyp für RMSSD (Herzratenvariabilität) erweitert
-                // FIX: WALKING erlaubt STEPS_PER_MINUTE und ist empfindlich genug,
-                // um die Vibrationen am Autolenkrad zu registrieren.
                 val config = ExerciseConfig.builder(ExerciseType.WALKING)
                     .setDataTypes(setOf(DataType.HEART_RATE_BPM, DataType.STEPS_PER_MINUTE))
                     .setIsAutoPauseAndResumeEnabled(false)
                     .build()
 
-
-
-
-                Log.d("ExerciseService", "Rufe startExerciseAsync auf...")
-
                 exerciseClient.startExerciseAsync(config).await()
-
-                Log.d("ExerciseService", "Training ERFOLGREICH gestartet!")
-
             } catch (e: SecurityException) {
-                // Spezifischer Catch für Permissions
                 Log.e("ExerciseService", "SecurityException trotz Check: ${e.message}")
+                releaseWakeLock()
                 stopSelf()
             } catch (e: Exception) {
                 Log.e("ExerciseService", "Allgemeiner Fehler beim Starten!", e)
+                releaseWakeLock()
                 stopSelf()
             }
         }
     }
 
-
-
     fun stopMonitoring() {
         lifecycleScope.launch {
             try {
-                // Versuche das Training offiziell zu beenden
                 exerciseClient.endExerciseAsync().await()
-                Log.d("ExerciseService", "Training erfolgreich beendet.")
             } catch (e: Exception) {
-                // Fange die HealthServicesException ab, falls gar kein Training aktiv war
                 Log.w("ExerciseService", "Fehler beim Beenden (Kein aktives Training): ${e.message}")
             } finally {
-                // Service in jedem Fall zuverlässig stoppen
+                releaseWakeLock()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
         }
     }
 
-
-
-    // --- Hilfsfunktionen für Benachrichtigungen ---
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) {
+                it.release()
+            }
+        }
+        wakeLock = null
+    }
 
     private fun createNotification(): Notification {
-        return NotificationCompat.Builder(this, "exercise_channel")
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val builder = NotificationCompat.Builder(this, "exercise_channel")
             .setContentTitle("Training aktiv")
             .setContentText("Überwache Vitalwerte...")
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // Ersetzen Sie dies durch Ihr App-Icon
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
             .setOngoing(true)
+
+        val ongoingActivityStatus = Status.Builder()
+            .addTemplate("Überwachung aktiv")
             .build()
+
+        val ongoingActivity = OngoingActivity.Builder(
+            this,
+            1,
+            builder
+        )
+            .setStaticIcon(android.R.drawable.ic_dialog_info)
+            .setTouchIntent(pendingIntent)
+            .setStatus(ongoingActivityStatus)
+            .build()
+
+        ongoingActivity.apply(this)
+
+        return builder.build()
     }
 
     private fun createNotificationChannel() {
